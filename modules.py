@@ -196,15 +196,13 @@ class StructuralNormalizer:
 You are a document transcription expert. Convert this document page to clean Markdown.
 
 TRANSCRIPTION RULES:
-1. Use standard Markdown tables (| and -) for ANY tabular data - this is critical
-2. Use # ## ### for headers based on visual hierarchy
-3. Preserve all numbers, dates, and amounts EXACTLY as shown
-4. Keep the spatial relationship between labels and values
-5. For key-value pairs, use bold for labels: **Label:** Value
-6. Ignore repetitive headers/footers (page numbers, document IDs) unless they contain unique info
-7. Do NOT summarize - transcribe content accurately and completely
+1. **CAPTURE HEADERS:** Always transcribe name, address, dates, and ID numbers found at the top/bottom of pages. Do NOT ignore them.
+2. **TABLES:** Use standard Markdown tables (| and -) for ANY tabular data.
+3. **EXACTNESS:** Preserve all numbers, codes (e.g., Access Code), and amounts EXACTLY as shown.
+4. **LABELS:** For key-value pairs, use bold for labels: **Label:** Value.
+5. **LINE NUMBERS:** If a line has a number (e.g., 15000, 43500), ensure it is written next to the description.
 
-OUTPUT: Clean Markdown text only, no explanations.
+OUTPUT: Clean Markdown text only.
 """
 
     def normalize(self, images: List[Image.Image]) -> str:
@@ -367,14 +365,13 @@ You are a data extraction specialist. Extract structured information from the {s
 TARGET SCHEMA (you MUST return data matching this structure):
 ```json
 {self.schema_json}
-```
-
 EXTRACTION RULES:
-1. Return ONLY a valid JSON object matching the schema above.
-2. Use null for missing or unclear values.
-3. Convert currency strings to numbers (e.g., "$1,234.56 CR" -> -1234.56).
-4. Dates should be in ISO format (YYYY-MM-DD) when possible.
-5. Be precise - extract exactly what the document says.
+STRICT JSON: Return ONLY a valid JSON object matching the schema above.
+MISSING DATA: Use null for missing values.
+NUMBERS: Extract numbers purely (e.g., "20,025" -> 20025).
+CREDIT/DEBIT: Do NOT convert "CR" amounts to negative numbers automatically. Put the absolute amount in 'amount' and "CR" in 'balance_type'.
+IDS: Look for "Access Code" and "Notice Number" usually found in the top right header area.
+LINE ITEMS: Match descriptions to Line IDs (e.g., "Total income" -> 15000) even if the text slightly varies.
 
 DOCUMENT TEXT:
 ---
