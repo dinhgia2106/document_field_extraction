@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "timestamp": "2025-12-10T10:45:56.143451",
+    "timestamp": "2025-12-10T10:50:58.470734",
     "success": true,
     "total_pages": 4,
     "kept_pages": 3,
@@ -10,44 +10,44 @@
     {
       "page": 1,
       "classification": "A",
-      "reason": "The document includes an account summary with a balance (nil), tax year, and social insurance number, all indicative of financial or tax-related data.",
+      "reason": "Contains numerical data related to assessment, balance and tax year.",
       "confidence": 0.95
     },
     {
       "page": 2,
       "classification": "A",
-      "reason": "The page contains numeric tables summarizing the tax assessment, including total income, deductions, taxable income, tax credits, and balance.",
+      "reason": "Contains a tax assessment summary with numeric tables and financial calculations, including total income, deductions, net income, and various tax credits.",
       "confidence": 0.95
     },
     {
       "page": 3,
       "classification": "A",
-      "reason": "Contains RRSP deduction limit statement with numerical data and calculations related to tax assessment.",
+      "reason": "Contains a numeric table with financial information about RRSP deduction limits and available contribution room.",
       "confidence": 0.95
     },
     {
       "page": 4,
       "classification": "C",
-      "reason": "Contains instructions, definitions and cautionary information.",
-      "confidence": 0.9
+      "reason": "This page contains instructions, definitions, and information about scams, rather than key numerical data or personal information.",
+      "confidence": 0.95
     }
   ],
   "extracted_data": {
     "social_insurance_number": "XXX XX6 789",
-    "tax_year": 2022,
+    "tax_year": "2022",
     "date_issued": "May 9, 2023",
     "total_income": 49013,
     "deductions_from_total_income": 10817,
     "net_income": 38196,
     "taxable_income": 38196,
-    "total_federal_non_refundable_tax_credits": 2676,
-    "total_ontario_non_refundable_tax_credits": 671,
-    "net_federal_tax": 2116.86,
-    "net_ontario_tax": 1629.08,
     "total_income_tax_deducted": 8092.8,
     "total_credits": 8209.29,
     "total_payable_minus_total_credits": 4463.35,
-    "balance": 4463.35
+    "balance": 4463.35,
+    "rrsp_deduction_limit_for_2023": 28516,
+    "available_contribution_room_for_2023": 28516,
+    "taxpayer_name": "JOHN SMITH",
+    "taxpayer_address": "3169 MILLICENT AVE OAKVILLE ON L6H 0V2"
   },
   "errors": []
 }

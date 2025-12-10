@@ -196,7 +196,7 @@ class StructuralNormalizer:
 You are a document transcription expert. Convert this document page to clean Markdown.
 
 TRANSCRIPTION RULES:
-1. **CAPTURE HEADERS:** Always transcribe name, address, dates, and ID numbers found at the top/bottom of pages. Do NOT ignore them.
+1. **CAPTURE HEADERS:** ALWAYS transcribe the Name and Address block found at the top left/right of the page. This is MANDATORY.
 2. **TABLES:** Use standard Markdown tables (| and -) for ANY tabular data.
 3. **EXACTNESS:** Preserve all numbers, codes (e.g., Access Code), and amounts EXACTLY as shown.
 4. **LABELS:** For key-value pairs, use bold for labels: **Label:** Value.
@@ -254,15 +254,16 @@ class SchemaDiscovery:
     def __init__(self, model_name: str = "gemini-2.0-flash"):
         self.model = genai.GenerativeModel(model_name)
         self.discovery_prompt = """
-You are a Senior Data Architect. Analyze these document pages (first few pages) to identify the ideal data structure.
+You are a Senior Data Architect. Analyze these representative document pages to identify the comprehensive data structure.
 
 YOUR TASK:
 1. Identify the Document Type (e.g., Invoice, Resume, Contract, Tax Form).
-2. Determine the 10-15 MOST CRITICAL fields that represent the core value of this document.
-   - Look across ALL pages to find relevant data.
-   - For Tax/Financial documents, MUST include: Total Income, Net Income, Taxable Income, Total Payable, Deductions, Credits.
-   - Focus on: ID numbers, Dates, Total Amounts, People/Entity Names.
-   - Do NOT include generic fields like "page_number" or layout details.
+2. Identify ALL fields that are relevant to the main content and purpose of the document.
+   - Do NOT limit the number of fields. If a piece of information is relevant, include it.
+   - Look across ALL provided pages.
+   - For Tax/Financial documents: Include comprehensive details like specific line items, breakdown of taxes, credits, and future planning figures if present.
+   - Focus on: ID numbers, Dates, Amounts, Names, Addresses, and Statuses.
+   - Exclude: Page numbers, purely decorative text, or generic boilerplate instructions.
 3. Define a JSON Schema for these fields.
 
 RETURN ONLY A VALID JSON OBJECT WITH THIS STRUCTURE:
@@ -272,7 +273,7 @@ RETURN ONLY A VALID JSON OBJECT WITH THIS STRUCTURE:
     "fields": [
         {
             "name": "field_name_snake_case",
-            "type": "string|number|date|boolean",
+            "type": "string|number|date|boolean|array",
             "description": "What this field represents"
         }
     ]
@@ -281,11 +282,39 @@ RETURN ONLY A VALID JSON OBJECT WITH THIS STRUCTURE:
 
     def discover(self, images: List[Image.Image]) -> Dict[str, Any]:
         """
-        Analyzes the first few pages to generate a dynamic schema.
+        Analyzes representative pages to generate a dynamic schema.
+        Strategy: Uniform spread sampling for large documents to catch all section types.
         """
-        # Limit to first 3 pages to get context without overloading
-        sample_images = images[:3]
-        print(f"[Discovery] Analyzing {len(sample_images)} pages for document structure...")
+        total_pages = len(images)
+        SAMPLE_LIMIT = 20  # Look at up to 20 pages to ensure coverage for 100+ page docs
+        
+        # Smart Sampling Strategy
+        if total_pages <= SAMPLE_LIMIT:
+            # Small/Medium document: Use all pages
+            sample_images = images
+        else:
+            # Large document: Intelligent Distributed Sampling
+            # Always keep first 3 pages (Intro/Summary/Table of Conteonts)
+            indices = {0, 1, 2}
+            # Always keep last 2 pages (Totals/Signatures)
+            indices.add(total_pages - 1)
+            indices.add(total_pages - 2)
+            
+            # Spread the remaining budget across the middle
+            remaining_slots = SAMPLE_LIMIT - len(indices)
+            if remaining_slots > 0:
+                # Calculate stride to skip through the middle section
+                start_mid = 3
+                end_mid = total_pages - 2
+                step = max(1, (end_mid - start_mid) // remaining_slots)
+                
+                for i in range(start_mid, end_mid, step):
+                    indices.add(i)
+            
+            # Sort indices and extract images
+            sample_images = [images[i] for i in sorted(list(indices))][:SAMPLE_LIMIT]
+
+        print(f"[Discovery] Analyzing {len(sample_images)} representative pages (Indices: {[i+1 for i in sorted(list(indices))][:SAMPLE_LIMIT]})...")
         
         try:
             # Send prompt + images
@@ -311,9 +340,9 @@ RETURN ONLY A VALID JSON OBJECT WITH THIS STRUCTURE:
                 "document_type": "General Document",
                 "fields": [
                     {"name": "summary", "type": "string", "description": "Summary of the document content"},
-                    {"name": "total_amount", "type": "number", "description": "Total value or amount if applicable"},
-                    {"name": "date", "type": "string", "description": "Primary date of the document"},
-                    {"name": "entities", "type": "array", "description": "Names of people or organizations"}
+                    {"name": "full_text", "type": "string", "description": "Full text content"},
+                    {"name": "key_dates", "type": "array", "description": "List of important dates found"},
+                    {"name": "total_amounts", "type": "array", "description": "List of financial amounts found"}
                 ]
             }
 

@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from pydantic import BaseModel, Field
-from typing import Optional, Literal
+from typing import Literal, Optional, List
 
 from modules import (
     Ingestion,
@@ -36,73 +36,72 @@ from modules import (
 # SCHEMA DEFINITIONS
 # =============================================================================
 
+# --- Sub-models for better organization ---
+
 class PersonalInfo(BaseModel):
-    """Information about the taxpayer."""
-    full_name: Optional[str] = Field(None, description="Full name of the taxpayer (e.g., JOHN SMITH)")
-    address: Optional[str] = Field(None, description="Full mailing address found on the document")
+    """Information about the taxpayer identifying who matches this document."""
+    full_name: Optional[str] = Field(None, description="Full name of the taxpayer found on address block (e.g., JOHN SMITH)")
+    address: Optional[str] = Field(None, description="Full mailing address including City, Province, and Postal Code")
     social_insurance_number: Optional[str] = Field(None, description="Social Insurance Number (SIN)")
 
 class DocumentMetadata(BaseModel):
-    """Official identifiers for the document."""
-    notice_type: str = Field("Notice of Assessment", description="Type of document")
+    """Official identifiers used for verification."""
+    notice_type: str = Field("Notice of Assessment", description="Type of document header")
     tax_year: int = Field(..., description="The taxation year (e.g., 2022)")
-    date_issued: Optional[str] = Field(None, description="Date issued (YYYY-MM-DD)")
-    access_code: Optional[str] = Field(None, description="Access code (usually 8 alphanumeric chars, e.g., CT92F9Q6)")
+    date_issued: Optional[str] = Field(None, description="Date issued (e.g., May 9, 2023)")
+    access_code: Optional[str] = Field(None, description="Access code usually found on the right side (e.g., CT92F9Q6)")
     notice_number: Optional[str] = Field(None, description="Notice number (e.g., 0690208)")
 
 class BalanceDetails(BaseModel):
-    """Detailed breakdown of the final balance."""
-    final_amount: Optional[float] = Field(None, description="The absolute dollar amount of the balance")
+    """Breakdown of the final financial outcome."""
+    final_amount: Optional[float] = Field(None, description="The absolute balance amount usually at the bottom of summary")
     balance_type: Optional[Literal["CR", "DR", "Nil"]] = Field(None, description="CR (Credit/Refund), DR (Debit/Owe), or Nil")
-    action_required: Optional[str] = Field(None, description="Action extracted from text (e.g., 'Refund', 'Pay', 'No amount to pay')")
+    payment_outcome: Optional[str] = Field(None, description="Context: 'Refund', 'Amount to Pay', or 'No amount'")
+
+class RrspDetails(BaseModel):
+    """RRSP info usually found on the last page."""
+    deduction_limit_next_year: Optional[float] = Field(None, description="RRSP deduction limit for the NEXT year (e.g., 2023 limit on 2022 NOA)")
+    available_contribution_room: Optional[float] = Field(None, description="Available contribution room")
+
+# --- Main Model ---
 
 class TaxAssessment(BaseModel):
     """
-    Enhanced Schema for CRA Notice of Assessment.
-    Matches specific Line IDs for financial verification.
+    Master Schema for Canada Revenue Agency (CRA) Notice of Assessment.
+    Uses nested structures for better data handling.
     """
-    # 1. Identity & Metadata
+    # 1. Who and When
     personal_info: PersonalInfo
     document_details: DocumentMetadata
 
-    # 2. Income Summary (Key Line Items)
+    # 2. Key Line Items (Financials)
+    # Using specific Line IDs for accuracy
     line_15000_total_income: Optional[float] = Field(None, description="Line 15000: Total income")
     line_23600_net_income: Optional[float] = Field(None, description="Line 23600: Net income")
     line_26000_taxable_income: Optional[float] = Field(None, description="Line 26000: Taxable income")
-
-    # 3. Tax Calculations & Credits
-    line_35000_total_federal_non_refundable_credits: Optional[float] = Field(None, description="Line 35000")
-    line_61500_total_ontario_non_refundable_credits: Optional[float] = Field(None, description="Line 61500 (or equivalent provincial credit)")
     
+    # 3. Tax Calculation
+    line_35000_total_federal_credits: Optional[float] = Field(None, description="Line 35000: Total federal non-refundable tax credits")
     line_42000_net_federal_tax: Optional[float] = Field(None, description="Line 42000: Net federal tax")
     line_42800_net_provincial_tax: Optional[float] = Field(None, description="Line 42800: Net provincial/territorial tax")
-    
-    line_43500_total_payable: Optional[float] = Field(None, description="Line 43500: Total payable (Total tax obligation)")
-    line_43700_total_income_tax_deducted: Optional[float] = Field(None, description="Line 43700: Tax already deducted at source")
-    line_44800_cpp_overpayment: Optional[float] = Field(None, description="Line 44800: CPP overpayment (if any)")
-    line_48200_total_credits: Optional[float] = Field(None, description="Line 48200: Total credits (Total amount paid/credited)")
+    line_43500_total_payable: Optional[float] = Field(None, description="Line 43500: Total payable")
+    line_43700_total_tax_deducted: Optional[float] = Field(None, description="Line 43700: Total income tax deducted")
+    line_48200_total_credits: Optional[float] = Field(None, description="Line 48200: Total credits")
 
-    # 4. Final Result
+    # 4. Result
     balance_summary: BalanceDetails
 
-    # 5. Future Limits & Other Info
-    rrsp_deduction_limit_next_year: Optional[float] = Field(None, description="RRSP deduction limit for the NEXT tax year")
-    earned_income_prior_year: Optional[float] = Field(None, description="Earned income amount used to calculate RRSP room (often '18% of ...')")
-    canada_training_credit_limit: Optional[float] = Field(None, description="Canada training credit limit for next year")
+    # 5. Future Planning (Page 3)
+    rrsp_info: RrspDetails
+
 
 class Invoice(BaseModel):
     """Schema for Invoice documents"""
-    invoice_number: str = Field(..., description="Invoice number or ID")
-    invoice_date: Optional[str] = Field(None, description="Invoice date (YYYY-MM-DD)")
-    vendor_name: Optional[str] = Field(None, description="Name of the vendor/seller")
-    buyer_name: Optional[str] = Field(None, description="Name of the buyer/customer")
-    subtotal: Optional[float] = Field(None, description="Subtotal before tax")
-    tax_amount: Optional[float] = Field(None, description="Tax amount")
+    invoice_number: str = Field(..., description="Invoice number")
     total_amount: Optional[float] = Field(None, description="Total amount due")
-    due_date: Optional[str] = Field(None, description="Payment due date")
+    # ... other fields
 
-
-# Schema registry for different document types
+# Update the Registry
 SCHEMAS = {
     "tax": TaxAssessment,
     "invoice": Invoice,

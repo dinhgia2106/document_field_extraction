@@ -1,0 +1,68 @@
+{
+  "metadata": {
+    "timestamp": "2025-12-10T10:53:35.639577",
+    "success": true,
+    "total_pages": 4,
+    "kept_pages": 3,
+    "dropped_pages": 1
+  },
+  "routing_details": [
+    {
+      "page": 1,
+      "classification": "A",
+      "reason": "Contains account summary with balance information (Nil) and tax year details which is key numerical data.",
+      "confidence": 0.95
+    },
+    {
+      "page": 2,
+      "classification": "A",
+      "reason": "This page contains a tax assessment summary with numerical data, total amounts, and financial calculations, making it high priority.",
+      "confidence": 0.95
+    },
+    {
+      "page": 3,
+      "classification": "A",
+      "reason": "The page contains numeric tables and tax calculations related to RRSP deduction limits and contribution room, which falls under the HIGH PRIORITY classification.",
+      "confidence": 0.95
+    },
+    {
+      "page": 4,
+      "classification": "C",
+      "reason": "The page primarily contains instructions, definitions, and general information about accessing and managing tax information, along with warnings about scams. There's no numeric table, financial summary, or key numerical data present, nor any personal information.",
+      "confidence": 0.95
+    }
+  ],
+  "extracted_data": {
+    "personal_info": {
+      "full_name": "JOHN SMITH",
+      "address": "3169 MILLICENT AVE\nOAKVILLE ON L6H 0V2",
+      "social_insurance_number": "XXX XX6 789"
+    },
+    "document_details": {
+      "notice_type": "Notice of assessment",
+      "tax_year": 2022,
+      "date_issued": "May 9, 2023",
+      "access_code": "CT92F9Q6",
+      "notice_number": "0690208"
+    },
+    "line_15000_total_income": 49013.0,
+    "line_23600_net_income": 38196.0,
+    "line_26000_taxable_income": 38196.0,
+    "line_35000_total_federal_credits": 2676.0,
+    "line_42000_net_federal_tax": 2116.86,
+    "line_42800_net_provincial_tax": 1629.08,
+    "line_43500_total_payable": 3745.94,
+    "line_43700_total_tax_deducted": 8092.8,
+    "line_48200_total_credits": 8209.29,
+    "balance_summary": {
+      "final_amount": 4463.35,
+      "balance_type": "CR",
+      "payment_outcome": "Refund"
+    },
+    "rrsp_info": {
+      "deduction_limit_next_year": 28516.0,
+      "available_contribution_room": 28516.0
+    }
+  },
+  "errors": []
+}
