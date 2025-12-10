@@ -1,0 +1,42 @@
+{
+  "metadata": {
+    "timestamp": "2025-12-10T10:23:22.015853",
+    "success": true,
+    "total_pages": 4,
+    "kept_pages": 4,
+    "dropped_pages": 0
+  },
+  "routing_details": [
+    {
+      "page": 1,
+      "classification": "A",
+      "reason": "The document contains an account summary and tax year, which is key numerical data, making it a high priority.",
+      "confidence": 0.95
+    },
+    {
+      "page": 2,
+      "classification": "A",
+      "reason": "The document contains a tax assessment with numeric tables, financial summaries, and total amounts.",
+      "confidence": 0.95
+    },
+    {
+      "page": 3,
+      "classification": "A",
+      "reason": "This page contains a financial summary related to RRSP deduction limits, with specific numerical data and amounts.",
+      "confidence": 0.95
+    },
+    {
+      "page": 4,
+      "classification": "B",
+      "reason": "The page contains information about taxpayer name, address, account numbers, reference numbers, dates, or identification details, particularly the mention of social insurance number and RRSP information.",
+      "confidence": 0.85
+    }
+  ],
+  "extracted_data": {
+    "social_insurance_number": "XXX XX6 789",
+    "tax_year": "2022",
+    "date_issued": "2023-05-09",
+    "balance": -4463.35
+  },
+  "errors": []
+}

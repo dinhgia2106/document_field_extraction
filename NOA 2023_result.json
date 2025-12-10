@@ -1,0 +1,74 @@
+{
+  "metadata": {
+    "timestamp": "2025-12-10T10:02:36.455861",
+    "success": true,
+    "total_pages": 8,
+    "kept_pages": 7,
+    "dropped_pages": 1
+  },
+  "routing_details": [
+    {
+      "page": 1,
+      "classification": "A",
+      "reason": "Contains amounts due, due dates, and tax information, which are key numerical data and financial summaries.",
+      "confidence": 0.95
+    },
+    {
+      "page": 2,
+      "classification": "A",
+      "reason": "The page contains numeric tables, tax calculations, total amounts, and assessment results which are all key numerical data.",
+      "confidence": 0.95
+    },
+    {
+      "page": 3,
+      "classification": "B",
+      "reason": "Contains personal information (name, address, SIN), tax year, and a dollar amount ($1,000.00).",
+      "confidence": 0.95
+    },
+    {
+      "page": 4,
+      "classification": "A",
+      "reason": "The page contains numeric tables detailing RRSP deduction limits and contribution room, which falls under financial summaries and key numerical data.",
+      "confidence": 0.95
+    },
+    {
+      "page": 5,
+      "classification": "B",
+      "reason": "The page contains links related to taxes and account information, phone numbers, and discussion of payment arrangements.",
+      "confidence": 0.85
+    },
+    {
+      "page": 6,
+      "classification": "C",
+      "reason": "The page appears to be mostly blank, with just a page number. This falls under low priority.",
+      "confidence": 0.95
+    },
+    {
+      "page": 7,
+      "classification": "A",
+      "reason": "The document contains fields for 'Amount due' and 'Amount paid', which fall under the category of payment information, and also contains the taxpayer's social insurance number and tax year.",
+      "confidence": 0.95
+    },
+    {
+      "page": 8,
+      "classification": "A",
+      "reason": "It contains an amount of payment field which can contain numeric data.",
+      "confidence": 0.9
+    }
+  ],
+  "extracted_data": {
+    "tax_year": 2023,
+    "taxpayer_name": "JOHN SMITH",
+    "sin_last_3_digits": "789",
+    "total_income": 128820.0,
+    "net_income": 125171.0,
+    "taxable_income": 125171.0,
+    "total_payable": 29348.86,
+    "final_balance": 6291.33,
+    "balance_type": "DR",
+    "notice_date": "2024-05-09",
+    "notice_id": "L7H7ZW4S",
+    "rrsp_deduction_limit_next_year": 51648.0
+  },
+  "errors": []
+}
