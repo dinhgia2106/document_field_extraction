@@ -150,6 +150,7 @@ def save_result(result: PipelineResult, output_path: str):
         },
         "routing_details": result.routing_details,
         "extracted_data": result.extracted_data,
+        "confidence_scores": result.confidence_scores,
         "errors": result.errors
     }
     
@@ -276,7 +277,7 @@ def run_pipeline(
         # Static Extraction
         extractor = SchemaExtractor(schema=schema, is_dynamic=False)
         
-    extracted_data = extractor.extract(markdown_content)
+    extracted_data, confidence_scores = extractor.extract(markdown_content)
 
     
     success = bool(extracted_data)
@@ -296,6 +297,7 @@ def run_pipeline(
         routing_details=routing_details,
         markdown_preview=markdown_content[:500] + "..." if len(markdown_content) > 500 else markdown_content,
         extracted_data=extracted_data,
+        confidence_scores=confidence_scores,
         errors=errors
     )
     
