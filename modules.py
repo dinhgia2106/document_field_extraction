@@ -387,61 +387,6 @@ class SchemaExtractor:
             self.schema_json = json.dumps(schema.model_json_schema(), indent=2)
             self.doc_type_hint = "Document"
 
-    def _verify_value(self, value: Any, source_text: str) -> float:
-        """
-        Calculates confidence score (0.0 - 1.0) by verifying if the value exists in source text.
-        This provides a DETERMINISTIC confidence metric, not an AI guess.
-        """
-        if value is None:
-            return 1.0  # None is always "correct" as it implies missing data
-
-        val_str = str(value).strip()
-        if not val_str:
-            return 1.0
-            
-        # 1. Exact Match
-        if val_str in source_text:
-            return 1.0
-            
-        # 2. Case Insensitive
-        source_lower = source_text.lower()
-        val_lower = val_str.lower()
-        if val_lower in source_lower:
-            return 0.95
-            
-        # 3. Numeric Formatting (e.g. 1000.0 vs 1,000.00)
-        if isinstance(value, (int, float)):
-            # Create regex pattern that allows commas and optional decimals
-            # 12000 -> 12,000
-            clean_num = str(value).replace('.0', '') # simplistic
-            if clean_num in source_text:
-                return 0.9
-            
-            # Try to find number with commas
-            try:
-                formatted = "{:,}".format(value)
-                if formatted in source_text:
-                    return 0.95
-            except:
-                pass
-
-        # 4. Fuzzy Match (Levenshtein) - for things like addresses or slight OCR errors
-        # Check if a decent substring match exists
-        # We don't scan whole text with fuzz, just check if it's "close enough" to something
-        # This is expensive on full text, so we skip complex fuzzy search for now
-        # and rely on clean extraction.
-        
-        return 0.0
-
-    def _calculate_confidence_map(self, data: Any, source_text: str) -> Any:
-        """Recursively build a parallel confidence structure."""
-        if isinstance(data, dict):
-            return {k: self._calculate_confidence_map(v, source_text) for k, v in data.items()}
-        elif isinstance(data, list):
-            return [self._calculate_confidence_map(item, source_text) for item in data]
-        else:
-            return self._verify_value(data, source_text)
-    
     def _build_extraction_prompt(self, markdown_text: str, error_feedback: Optional[str] = None) -> str:
         """Build the extraction prompt with optional error feedback for self-correction."""
         
@@ -486,7 +431,7 @@ Please fix these errors and try again. Ensure your response is valid JSON matchi
         )
         return json.loads(response.text)
 
-    def extract(self, markdown_text: str) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    def extract(self, markdown_text: str) -> Dict[str, Any]:
         """
         Extracts structured data from markdown with self-correction loop.
         
@@ -494,7 +439,7 @@ Please fix these errors and try again. Ensure your response is valid JSON matchi
             markdown_text: Normalized Markdown content
             
         Returns:
-            Tuple: (Validated Data Dict, Confidence Score Dict)
+            Dict: Validated Data Dict
         """
         print(f"[Extractor] Starting extraction with {self.MAX_RETRIES} max attempts...")
         
@@ -516,15 +461,13 @@ Please fix these errors and try again. Ensure your response is valid JSON matchi
                     # For dynamic mode, we just check if it's valid JSON (already done by json.loads)
                     # We could add more complex checks here if needed
                     print(f"[Extractor] Validation passed (Dynamic Mode)")
-                    confidence_map = self._calculate_confidence_map(raw_result, markdown_text)
-                    return raw_result, confidence_map
+                    return raw_result
                 else:
-                    # Startic Pydantic Validation
+                    # Static Pydantic Validation
                     validated = self.schema_obj.model_validate(raw_result)
                     print(f"[Extractor] Validation passed on attempt {attempt}")
                     data = validated.model_dump()
-                    confidence_map = self._calculate_confidence_map(data, markdown_text)
-                    return data, confidence_map
+                    return data
                 
                 
             except ValidationError as ve:
@@ -541,7 +484,7 @@ Please fix these errors and try again. Ensure your response is valid JSON matchi
         
         # All retries failed
         print(f"[Extractor] Extraction failed after {self.MAX_RETRIES} attempts")
-        return {}, {}
+        return {}
     
     def _format_validation_error(self, error: ValidationError) -> str:
         """Format Pydantic validation errors for LLM feedback."""
@@ -564,5 +507,4 @@ class PipelineResult(BaseModel):
     routing_details: List[Dict[str, Any]]
     markdown_preview: str
     extracted_data: Dict[str, Any]
-    confidence_scores: Dict[str, Any] = {}
     errors: List[str] = []
