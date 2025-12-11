@@ -30,7 +30,7 @@ if "GEMINI_API_KEY" in os.environ:
 # Fast/cheap model for routing (classification tasks)
 ROUTER_MODEL = "gemini-2.0-flash"
 # Powerful model for extraction (complex reasoning)
-EXTRACTION_MODEL = "gemini-2.0-flash"
+EXTRACTION_MODEL = "gemini-2.5-flash"
 # High DPI for better OCR accuracy
 IMAGE_DPI = 300
 
@@ -428,174 +428,97 @@ Please fix these errors and try again. Ensure your response is valid JSON matchi
             )
         )
         return json.loads(response.text)
-    
-    def _call_llm_with_logprobs(self, prompt: str) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
+
+    def _evaluate_with_judge(self, markdown_text: str, extracted_data: Dict[str, Any]) -> Dict[str, float]:
         """
-        Call LLM and return both parsed JSON result and logprobs data.
-        
-        Returns:
-            Tuple of (parsed_data, logprobs_list)
-            logprobs_list contains [{"token": str, "prob": float, "logprob": float}, ...]
-        """
-        # Use dictionary config instead of GenerationConfig class
-        # because response_logprobs is not a direct parameter of GenerationConfig
-        generation_config = {
-            "response_mime_type": "application/json",
-            "response_logprobs": True,
-            "logprobs": 3,  # Only need top 1 for confidence calculation
-            "temperature": 0  # Deterministic output for consistent extraction
-        }
-        
-        response = self.model.generate_content(
-            prompt,
-            generation_config=generation_config
-        )
-        
-        # Extract logprobs data from response
-        logprobs_list = []
-        candidate = response.candidates[0]
-        
-        if hasattr(candidate, 'logprobs_result') and candidate.logprobs_result:
-            top_candidates = candidate.logprobs_result.top_candidates
-            if top_candidates:
-                for step in top_candidates:
-                    for cand in step.candidates:
-                        prob = min(math.exp(cand.log_probability), 1.0)
-                        logprobs_list.append({
-                            "token": cand.token,
-                            "prob": prob,
-                            "logprob": cand.log_probability
-                        })
-                        break  # Only take the first (chosen) candidate
-        
-        return json.loads(response.text), logprobs_list
-    
-    def _calculate_field_confidence(self, extracted_data: Dict[str, Any], 
-                                     logprobs_list: List[Dict[str, Any]]) -> Dict[str, float]:
-        """
-        Calculate confidence score for each field based on logprobs.
-        
-        Strategy:
-        1. Reconstruct the JSON string from tokens
-        2. For each field key, find the token range where its value is defined
-        3. Average the probabilities of those tokens
+        Use a second LLM pass to evaluate the accuracy of extracted data.
         
         Args:
-            extracted_data: The extracted data dictionary
-            logprobs_list: List of token logprobs from LLM response
+            markdown_text: The source document text
+            extracted_data: The data extracted in the first pass
             
         Returns:
-            Dict mapping field names to confidence scores (0.0 - 1.0)
+            Dict mapping field paths (dot notation) to confidence scores (0.0 - 1.0)
         """
-        if not logprobs_list:
-            return {}
+        judge_prompt = f"""
+You are a Quality Assurance Auditor. Verify the EXTRACTED DATA against the DOCUMENT TEXT.
+
+DOCUMENT TEXT:
+---
+{markdown_text}
+---
+
+EXTRACTED DATA:
+```json
+{json.dumps(extracted_data, indent=2)}
+```
+
+TASK:
+1. Compare each value in the EXTRACTED DATA against the DOCUMENT TEXT.
+2. Assign a confidence score (0.0 to 1.0) for each field based on accuracy and evidence.
+   - 1.0: Exact match found in text.
+   - 0.8: Semantic match (synonym or reformatting) but accurate.
+   - 0.5: Ambiguous or low confidence.
+   - 0.0: Data definitely not in text or incorrect.
+
+OUTPUT FORMAT:
+Return a JSON object with the EXACT SAME STRUCTURE as the EXTRACTED DATA, but replace every value with its confidence score.
+- For lists, return a list of objects with scores.
+- Keep the structure identical.
+
+Example Input: {{"name": "John", "details": {{"age": 30}}}}
+Example Output: {{"name": 1.0, "details": {{"age": 0.9}}}}
+"""
+        try:
+            # We use the same model class but it acts as a "second judge"
+            # Ideally this could be a stronger model if available
+            response = self.model.generate_content(
+                judge_prompt,
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json"
+                )
+            )
+            confidence_structure = json.loads(response.text)
+            
+            # Flatten the structure to match the expected output format (dot notation keys)
+            return self._flatten_confidence_map(confidence_structure)
+            
+        except Exception as e:
+            print(f"[Judge] Error evaluating confidence: {e}")
+            # Return default confidence if judge fails
+            return {"error": 0.0}
+
+    def _flatten_confidence_map(self, data: Any, prefix: str = "") -> Dict[str, float]:
+        """Helper to flatten nested confidence structure into dot notation keys."""
+        result = {}
         
-        confidence_map = {}
-        
-        # Reconstruct the full response text from tokens
-        full_text = "".join([lp["token"] for lp in logprobs_list])
-        
-        def get_field_confidence(field_name: str, field_value: Any) -> float:
-            """
-            Find the tokens corresponding to a field value and compute average confidence.
-            """
-            if field_value is None:
-                return 0.0  # Null values have no confidence
-            
-            # Convert value to string representation for matching
-            if isinstance(field_value, bool):
-                value_str = "true" if field_value else "false"
-            elif isinstance(field_value, (int, float)):
-                value_str = str(field_value)
-            elif isinstance(field_value, str):
-                value_str = field_value
-            elif isinstance(field_value, dict):
-                # For nested objects, we'll calculate confidence recursively
-                nested_confidences = []
-                for k, v in field_value.items():
-                    nested_conf = get_field_confidence(k, v)
-                    if nested_conf > 0:
-                        nested_confidences.append(nested_conf)
-                return sum(nested_confidences) / len(nested_confidences) if nested_confidences else 0.0
-            elif isinstance(field_value, list):
-                # For arrays, average the confidence of each element
-                if not field_value:
-                    return 0.0
-                element_confidences = []
-                for item in field_value:
-                    item_conf = get_field_confidence("", item)
-                    if item_conf > 0:
-                        element_confidences.append(item_conf)
-                return sum(element_confidences) / len(element_confidences) if element_confidences else 0.0
-            else:
-                value_str = str(field_value)
-            
-            # Find the value in the full text and get corresponding token indices
-            value_start = full_text.find(value_str)
-            if value_start == -1:
-                # Try without quotes for string values
-                value_start = full_text.find(f'"{value_str}"')
-                if value_start != -1:
-                    value_start += 1  # Skip opening quote
-            
-            if value_start == -1:
-                return 0.85  # Default confidence if we can't locate the value
-            
-            value_end = value_start + len(value_str)
-            
-            # Map character positions to token indices
-            char_pos = 0
-            token_probs = []
-            
-            for lp in logprobs_list:
-                token_len = len(lp["token"])
-                token_end = char_pos + token_len
-                
-                # Check if this token overlaps with the value range
-                if char_pos < value_end and token_end > value_start:
-                    token_probs.append(lp["prob"])
-                
-                char_pos = token_end
-                
-                if char_pos >= value_end:
-                    break
-            
-            if token_probs:
-                return sum(token_probs) / len(token_probs)
-            
-            return 0.85  # Default if no matching tokens found
-        
-        # Calculate confidence for each field
-        def process_fields(data: Dict[str, Any], prefix: str = "") -> Dict[str, float]:
-            result = {}
+        if isinstance(data, dict):
             for key, value in data.items():
                 field_path = f"{prefix}.{key}" if prefix else key
-                
-                if isinstance(value, dict):
-                    # Recursively process nested objects
-                    nested_result = process_fields(value, field_path)
-                    result.update(nested_result)
-                    # Also store the aggregate confidence for the parent
-                    if nested_result:
-                        result[field_path] = sum(nested_result.values()) / len(nested_result)
-                elif isinstance(value, list) and value and isinstance(value[0], dict):
-                    # List of objects
-                    list_confidences = []
-                    for i, item in enumerate(value):
-                        if isinstance(item, dict):
-                            item_result = process_fields(item, f"{field_path}[{i}]")
-                            result.update(item_result)
-                            if item_result:
-                                list_confidences.append(sum(item_result.values()) / len(item_result))
-                    if list_confidences:
-                        result[field_path] = sum(list_confidences) / len(list_confidences)
+                if isinstance(value, (dict, list)):
+                    # Recurse
+                    nested = self._flatten_confidence_map(value, field_path)
+                    result.update(nested)
+                    # Also calculate aggregate average for the node itself if needed
+                    # For now we just keep leaf nodes or structured nodes
+                    if nested:
+                         result[field_path] = sum(nested.values()) / len(nested)
+                elif isinstance(value, (int, float)):
+                    result[field_path] = float(value)
                 else:
-                    result[field_path] = get_field_confidence(key, value)
-            
-            return result
-        
-        confidence_map = process_fields(extracted_data)
-        return confidence_map
+                    # Should not happen if LLM follows instructions, but safe fallback
+                    result[field_path] = 0.0
+                    
+        elif isinstance(data, list):
+            for i, item in enumerate(data):
+                field_path = f"{prefix}[{i}]"
+                nested = self._flatten_confidence_map(item, field_path)
+                result.update(nested)
+                
+        return result
+
+    
+
 
     def extract(self, markdown_text: str, with_confidence: bool = False) -> Dict[str, Any]:
         """
@@ -611,7 +534,7 @@ Please fix these errors and try again. Ensure your response is valid JSON matchi
         """
         print(f"[Extractor] Starting extraction with {self.MAX_RETRIES} max attempts...")
         if with_confidence:
-            print(f"[Extractor] Confidence calculation enabled (using logprobs)")
+            print(f"[Extractor] Confidence calculation enabled (using Judge LLM)")
         
         error_feedback = None
         
@@ -622,13 +545,8 @@ Please fix these errors and try again. Ensure your response is valid JSON matchi
                 # Build prompt (with error feedback if retry)
                 prompt = self._build_extraction_prompt(markdown_text, error_feedback)
                 
-                # Call LLM - with logprobs if confidence is requested
-                if with_confidence:
-                    raw_result, logprobs_list = self._call_llm_with_logprobs(prompt)
-                    print(f"[Extractor] Received {len(logprobs_list)} tokens with logprobs")
-                else:
-                    raw_result = self._call_llm(prompt)
-                    logprobs_list = None
+                # Call LLM
+                raw_result = self._call_llm(prompt)
                 
                 print(f"[Extractor] LLM returned: {json.dumps(raw_result, indent=2)[:200]}...")
                 
@@ -637,11 +555,12 @@ Please fix these errors and try again. Ensure your response is valid JSON matchi
                     # For dynamic mode, we just check if it's valid JSON (already done by json.loads)
                     print(f"[Extractor] Validation passed (Dynamic Mode)")
                     
-                    # Calculate confidence if requested
-                    if with_confidence and logprobs_list:
-                        confidence_map = self._calculate_field_confidence(raw_result, logprobs_list)
+                    # Calculate confidence if requested using Judge LLM
+                    if with_confidence:
+                        print(f"[Extractor] Calculating confidence using Judge LLM...")
+                        confidence_map = self._evaluate_with_judge(markdown_text, raw_result)
                         raw_result['_confidence'] = confidence_map
-                        print(f"[Extractor] Calculated confidence for {len(confidence_map)} fields")
+                        print(f"[Extractor] Judge returned confidence for {len(confidence_map)} fields")
                     
                     return raw_result
                 else:
@@ -650,11 +569,12 @@ Please fix these errors and try again. Ensure your response is valid JSON matchi
                     print(f"[Extractor] Validation passed on attempt {attempt}")
                     data = validated.model_dump()
                     
-                    # Calculate confidence if requested
-                    if with_confidence and logprobs_list:
-                        confidence_map = self._calculate_field_confidence(data, logprobs_list)
+                    # Calculate confidence if requested using Judge LLM
+                    if with_confidence:
+                        print(f"[Extractor] Calculating confidence using Judge LLM...")
+                        confidence_map = self._evaluate_with_judge(markdown_text, data)
                         data['_confidence'] = confidence_map
-                        print(f"[Extractor] Calculated confidence for {len(confidence_map)} fields")
+                        print(f"[Extractor] Judge returned confidence for {len(confidence_map)} fields")
                     
                     return data
                 

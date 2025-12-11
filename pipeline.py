@@ -186,7 +186,7 @@ def run_pipeline(
     print("=" * 60)
     print(f"Input: {pdf_path}")
     print(f"Mode: {'DYNAMIC DISCOVERY' if use_dynamic_schema else f'STATIC SCHEMA ({schema_type})'}")
-    print(f"Confidence: {'ENABLED (using logprobs)' if calculate_confidence else 'DISABLED'}")
+    print(f"Confidence: {'ENABLED (using Judge LLM)' if calculate_confidence else 'DISABLED'}")
     print("=" * 60 + "\n")
     
     # Get schema (if static)
@@ -346,7 +346,7 @@ Examples:
         help="Document schema type (default: tax)"
     )
     parser.add_argument("--dynamic", action="store_true", help="Enable Dynamic Schema Discovery (Ignore --schema)")
-    parser.add_argument("--confidence", "-c", action="store_true", help="Calculate per-field confidence using logprobs")
+    parser.add_argument("--confidence", "-c", action="store_true", help="Calculate per-field confidence using Judge LLM")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
 
     parser.add_argument("--output", "-o", help="Output JSON file path (default: <pdf_name>_result.json)")
