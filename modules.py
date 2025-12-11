@@ -407,16 +407,23 @@ class SchemaExtractor:
         base_prompt = f"""
 You are a data extraction specialist. Extract structured information from the {self.doc_type_hint} below.
 
-TARGET SCHEMA (you MUST return data matching this structure):
+You must output a JSON object with two top-level keys:
+1. "data": The extracted data matching the TARGET SCHEMA.
+2. "field_evaluations": A dictionary where keys are field names. For EACH extracted field, providing:
+   - "confidence": A score from 0.0 to 1.0 indicating your certainty.
+   - "relevance_check": A brief check on whether this extracted value is truly relevant to the field's definition in the context of this document.
+
+TARGET SCHEMA for "data":
 ```json
 {self.schema_json}
+```
+
 EXTRACTION RULES:
-STRICT JSON: Return ONLY a valid JSON object matching the schema above.
-MISSING DATA: Use null for missing values.
-NUMBERS: Extract numbers purely (e.g., "20,025" -> 20025).
-CREDIT/DEBIT: Do NOT convert "CR" amounts to negative numbers automatically. Put the absolute amount in 'amount' and "CR" in 'balance_type'.
-IDS: Look for "Access Code" and "Notice Number" usually found in the top right header area.
-LINE ITEMS: Match descriptions to Line IDs (e.g., "Total income" -> 15000) even if the text slightly varies.
+- STRICT JSON: Return ONLY a valid JSON object with "data" and "field_evaluations".
+- MISSING DATA: Use null for missing values in "data".
+- NUMBERS: Extract numbers purely (e.g., "20,025" -> 20025).
+- IDS: Look for "Access Code" and "Notice Number" usually found in the top right header area.
+- CRITICAL: Review the "relevance_check" carefully. If a field seems present but doesn't semantically match the schema definition, lower the confidence.
 
 DOCUMENT TEXT:
 ---
@@ -469,130 +476,39 @@ Please fix these errors and try again. Ensure your response is valid JSON matchi
             print(f"[Extractor] ChatGPT call failed: {e}")
             return {}
 
-    def _flatten(self, d: Dict[str, Any], parent_key: str = '', sep: str = '.') -> Dict[str, Any]:
-        """Flatten a nested dictionary."""
-        items = []
-        for k, v in d.items():
-            new_key = f"{parent_key}{sep}{k}" if parent_key else k
-            if isinstance(v, dict):
-                items.extend(self._flatten(v, new_key, sep=sep).items())
-            elif isinstance(v, list):
-                # Handle list by index
-                for i, item in enumerate(v):
-                    list_key = f"{new_key}[{i}]"
-                    if isinstance(item, dict):
-                        items.extend(self._flatten(item, list_key, sep=sep).items())
-                    else:
-                        items.append((list_key, item))
-            else:
-                items.append((new_key, v))
-        return dict(items)
-
-    def _unflatten(self, flat_dict: Dict[str, Any], sep: str = '.') -> Dict[str, Any]:
-        """Unflatten a dictionary (reconstruct structure)."""
-        return self._reconstruct_recursive(flat_dict)
-
-    def _reconstruct_recursive(self, flat_dict: Dict[str, Any]) -> Any:
-        unflat = {}
-        for key, value in flat_dict.items():
-            parts = key.replace('[', '.').replace(']', '').split('.')
-            target = unflat
-            for i, part in enumerate(parts[:-1]):
-                if part not in target:
-                    target[part] = {}
-                target = target[part]
-            target[parts[-1]] = value
-        
-        return self._convert_dict_list(unflat)
-
-    def _convert_dict_list(self, obj: Any) -> Any:
-        if isinstance(obj, dict):
-            # Check if all keys are integers
-            if all(k.isdigit() for k in obj.keys()):
-                # Convert to list
-                return [self._convert_dict_list(obj[k]) for k in sorted(obj.keys(), key=int)]
-            else:
-                return {k: self._convert_dict_list(v) for k, v in obj.items()}
-        return obj
-
-    
-
-
     def extract(self, markdown_text: str, with_confidence: bool = False) -> Dict[str, Any]:
         """
-        Extracts structured data using a 4-pass consensus (2 Gemini, 2 ChatGPT).
+        Extracts structured data using a single Gemini pass with self-evaluation.
         """
-        print("[Extractor] Starting 4-way Consensus Extraction (2 Gemini, 2 ChatGPT)...")
+        print("[Extractor] Starting Extraction (Gemini + Self-Correction)...")
         
         prompt = self._build_extraction_prompt(markdown_text)
-        results = []
         
-        # 1. Thread 1 & 2: Gemini
-        for i in range(2):
-            print(f"[Extractor] Calling Gemini (Pass {i+1}/2)...")
-            res = self._call_llm(prompt)
-            if res: results.append(res)
-            
-        # 2. Thread 3 & 4: ChatGPT
-        for i in range(2):
-            print(f"[Extractor] Calling ChatGPT (Pass {i+1}/2)...")
-            res = self._call_openai(prompt)
-            if res: results.append(res)
-            
-        print(f"[Extractor] Gathered {len(results)} valid responses.")
+        # Single Gemini Call
+        result = self._call_llm(prompt)
         
-        if not results:
-            print("[Extractor] All extractions failed.")
+        if not result:
+            print("[Extractor] Extraction failed (No response).")
             return {}
-
-        # 3. Consensus Voting
-        flat_results = [self._flatten(r) for r in results]
         
-        # Collect all unique keys
-        all_keys = set().union(*[d.keys() for d in flat_results])
-        
-        final_flat_data = {}
-        confidence_flat_map = {}
-        
-        total_runs = 4 
-        
-        for key in all_keys:
-            # Gather values for this key from all results
-            values = []
-            for fr in flat_results:
-                if key in fr:
-                    values.append(fr[key])
-            
-            if not values:
-                continue
-                
-            def make_hashable(v):
-                if isinstance(v, (dict, list)):
-                    return json.dumps(v, sort_keys=True)
-                return v
-
-            hashable_values = [make_hashable(v) for v in values]
-            counts = Counter(hashable_values)
-            
-            most_common_val_hash, count = counts.most_common(1)[0]
-            
-            # Retrieve original value
-            index = hashable_values.index(most_common_val_hash)
-            final_val = values[index]
-            
-            # Confidence Calculation
-            confidence = count / total_runs
-            
-            final_flat_data[key] = final_val
-            confidence_flat_map[key] = confidence
-            
-        # 4. Reconstruct
-        print("[Extractor] Reconstructing consensus data...")
-        final_data = self._unflatten(final_flat_data)
-        
-        final_data['_confidence'] = confidence_flat_map
-        
-        return final_data
+        # Normalize result structure
+        if "data" in result and "field_evaluations" in result:
+             final_data = result["data"]
+             evals = result["field_evaluations"]
+             
+             # Attach metadata
+             final_data["_confidence"] = {k: v.get("confidence", 0.0) for k, v in evals.items()}
+             final_data["_relevance"] = {k: v.get("relevance_check", "") for k, v in evals.items()}
+             
+             return final_data
+        elif "data" in result:
+             # Partial success
+             return result["data"]
+        else:
+             # Fallback if LLM forgot structure and just returned data
+             # Check if it looks like data (heuristic)
+             print("[Extractor] Warning: Unexpected response structure, assuming direct data.")
+             return result
 
     def _format_validation_error(self, error: ValidationError) -> str:
         """Format Pydantic validation errors for LLM feedback."""
