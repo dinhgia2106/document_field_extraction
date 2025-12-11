@@ -13,9 +13,14 @@ import json
 import math
 import typing
 from typing import List, Dict, Any, Optional, Type
+from collections import Counter
 from PIL import Image
 from pdf2image import convert_from_path
 import google.generativeai as genai
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 from pydantic import BaseModel, ValidationError
 import re
 from difflib import SequenceMatcher
@@ -384,6 +389,17 @@ class SchemaExtractor:
             # Static Pydantic Model
             self.schema_json = json.dumps(schema.model_json_schema(), indent=2)
             self.doc_type_hint = "Document"
+        
+        # Initialize OpenAI client 
+        self.openai_client = None
+        if OpenAI:
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if api_key:
+                self.openai_client = OpenAI(api_key=api_key)
+            else:
+                print("[SchemaExtractor] Warning: OPENAI_API_KEY not found. ChatGPT calls will be skipped.")
+        else:
+             print("[SchemaExtractor] Warning: 'openai' module not installed. ChatGPT calls will be skipped.")
 
     def _build_extraction_prompt(self, markdown_text: str, error_feedback: Optional[str] = None) -> str:
         """Build the extraction prompt with optional error feedback for self-correction."""
@@ -420,180 +436,171 @@ Please fix these errors and try again. Ensure your response is valid JSON matchi
         return base_prompt
 
     def _call_llm(self, prompt: str) -> Dict[str, Any]:
-        """Call LLM and parse JSON response."""
-        response = self.model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(
-                response_mime_type="application/json"
-            )
-        )
-        return json.loads(response.text)
-
-    def _evaluate_with_judge(self, markdown_text: str, extracted_data: Dict[str, Any]) -> Dict[str, float]:
-        """
-        Use a second LLM pass to evaluate the accuracy of extracted data.
-        
-        Args:
-            markdown_text: The source document text
-            extracted_data: The data extracted in the first pass
-            
-        Returns:
-            Dict mapping field paths (dot notation) to confidence scores (0.0 - 1.0)
-        """
-        judge_prompt = f"""
-You are a Quality Assurance Auditor. Verify the EXTRACTED DATA against the DOCUMENT TEXT.
-
-DOCUMENT TEXT:
----
-{markdown_text}
----
-
-EXTRACTED DATA:
-```json
-{json.dumps(extracted_data, indent=2)}
-```
-
-TASK:
-1. Compare each value in the EXTRACTED DATA against the DOCUMENT TEXT.
-2. Assign a confidence score (0.0 to 1.0) for each field based on accuracy and evidence.
-   - 1.0: Exact match found in text.
-   - 0.8: Semantic match (synonym or reformatting) but accurate.
-   - 0.5: Ambiguous or low confidence.
-   - 0.0: Data definitely not in text or incorrect.
-
-OUTPUT FORMAT:
-Return a JSON object with the EXACT SAME STRUCTURE as the EXTRACTED DATA, but replace every value with its confidence score.
-- For lists, return a list of objects with scores.
-- Keep the structure identical.
-
-Example Input: {{"name": "John", "details": {{"age": 30}}}}
-Example Output: {{"name": 1.0, "details": {{"age": 0.9}}}}
-"""
+        """Call Gemini and parse JSON response."""
         try:
-            # We use the same model class but it acts as a "second judge"
-            # Ideally this could be a stronger model if available
             response = self.model.generate_content(
-                judge_prompt,
+                prompt,
                 generation_config=genai.GenerationConfig(
                     response_mime_type="application/json"
                 )
             )
-            confidence_structure = json.loads(response.text)
-            
-            # Flatten the structure to match the expected output format (dot notation keys)
-            return self._flatten_confidence_map(confidence_structure)
-            
+            return json.loads(response.text)
         except Exception as e:
-            print(f"[Judge] Error evaluating confidence: {e}")
-            # Return default confidence if judge fails
-            return {"error": 0.0}
+            print(f"[Extractor] Gemini call failed: {e}")
+            return {}
 
-    def _flatten_confidence_map(self, data: Any, prefix: str = "") -> Dict[str, float]:
-        """Helper to flatten nested confidence structure into dot notation keys."""
-        result = {}
+    def _call_openai(self, prompt: str) -> Dict[str, Any]:
+        """Call ChatGPT (OpenAI) and parse JSON response."""
+        if not self.openai_client:
+            return {}
         
-        if isinstance(data, dict):
-            for key, value in data.items():
-                field_path = f"{prefix}.{key}" if prefix else key
-                if isinstance(value, (dict, list)):
-                    # Recurse
-                    nested = self._flatten_confidence_map(value, field_path)
-                    result.update(nested)
-                    # Also calculate aggregate average for the node itself if needed
-                    # For now we just keep leaf nodes or structured nodes
-                    if nested:
-                         result[field_path] = sum(nested.values()) / len(nested)
-                elif isinstance(value, (int, float)):
-                    result[field_path] = float(value)
-                else:
-                    # Should not happen if LLM follows instructions, but safe fallback
-                    result[field_path] = 0.0
-                    
-        elif isinstance(data, list):
-            for i, item in enumerate(data):
-                field_path = f"{prefix}[{i}]"
-                nested = self._flatten_confidence_map(item, field_path)
-                result.update(nested)
-                
-        return result
+        try:
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that outputs JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+            content = response.choices[0].message.content
+            return json.loads(content)
+        except Exception as e:
+            print(f"[Extractor] ChatGPT call failed: {e}")
+            return {}
+
+    def _flatten(self, d: Dict[str, Any], parent_key: str = '', sep: str = '.') -> Dict[str, Any]:
+        """Flatten a nested dictionary."""
+        items = []
+        for k, v in d.items():
+            new_key = f"{parent_key}{sep}{k}" if parent_key else k
+            if isinstance(v, dict):
+                items.extend(self._flatten(v, new_key, sep=sep).items())
+            elif isinstance(v, list):
+                # Handle list by index
+                for i, item in enumerate(v):
+                    list_key = f"{new_key}[{i}]"
+                    if isinstance(item, dict):
+                        items.extend(self._flatten(item, list_key, sep=sep).items())
+                    else:
+                        items.append((list_key, item))
+            else:
+                items.append((new_key, v))
+        return dict(items)
+
+    def _unflatten(self, flat_dict: Dict[str, Any], sep: str = '.') -> Dict[str, Any]:
+        """Unflatten a dictionary (reconstruct structure)."""
+        return self._reconstruct_recursive(flat_dict)
+
+    def _reconstruct_recursive(self, flat_dict: Dict[str, Any]) -> Any:
+        unflat = {}
+        for key, value in flat_dict.items():
+            parts = key.replace('[', '.').replace(']', '').split('.')
+            target = unflat
+            for i, part in enumerate(parts[:-1]):
+                if part not in target:
+                    target[part] = {}
+                target = target[part]
+            target[parts[-1]] = value
+        
+        return self._convert_dict_list(unflat)
+
+    def _convert_dict_list(self, obj: Any) -> Any:
+        if isinstance(obj, dict):
+            # Check if all keys are integers
+            if all(k.isdigit() for k in obj.keys()):
+                # Convert to list
+                return [self._convert_dict_list(obj[k]) for k in sorted(obj.keys(), key=int)]
+            else:
+                return {k: self._convert_dict_list(v) for k, v in obj.items()}
+        return obj
 
     
 
 
     def extract(self, markdown_text: str, with_confidence: bool = False) -> Dict[str, Any]:
         """
-        Extracts structured data from markdown with self-correction loop.
-        
-        Args:
-            markdown_text: Normalized Markdown content
-            with_confidence: If True, also calculate and return confidence scores
-            
-        Returns:
-            Dict: Validated Data Dict. If with_confidence=True, includes '_confidence' key
-                  with per-field confidence scores.
+        Extracts structured data using a 4-pass consensus (2 Gemini, 2 ChatGPT).
         """
-        print(f"[Extractor] Starting extraction with {self.MAX_RETRIES} max attempts...")
-        if with_confidence:
-            print(f"[Extractor] Confidence calculation enabled (using Judge LLM)")
+        print("[Extractor] Starting 4-way Consensus Extraction (2 Gemini, 2 ChatGPT)...")
         
-        error_feedback = None
+        prompt = self._build_extraction_prompt(markdown_text)
+        results = []
         
-        for attempt in range(1, self.MAX_RETRIES + 1):
-            print(f"[Extractor] Attempt {attempt}/{self.MAX_RETRIES}...")
+        # 1. Thread 1 & 2: Gemini
+        for i in range(2):
+            print(f"[Extractor] Calling Gemini (Pass {i+1}/2)...")
+            res = self._call_llm(prompt)
+            if res: results.append(res)
             
-            try:
-                # Build prompt (with error feedback if retry)
-                prompt = self._build_extraction_prompt(markdown_text, error_feedback)
-                
-                # Call LLM
-                raw_result = self._call_llm(prompt)
-                
-                print(f"[Extractor] LLM returned: {json.dumps(raw_result, indent=2)[:200]}...")
-                
-                # Validate
-                if self.is_dynamic:
-                    # For dynamic mode, we just check if it's valid JSON (already done by json.loads)
-                    print(f"[Extractor] Validation passed (Dynamic Mode)")
-                    
-                    # Calculate confidence if requested using Judge LLM
-                    if with_confidence:
-                        print(f"[Extractor] Calculating confidence using Judge LLM...")
-                        confidence_map = self._evaluate_with_judge(markdown_text, raw_result)
-                        raw_result['_confidence'] = confidence_map
-                        print(f"[Extractor] Judge returned confidence for {len(confidence_map)} fields")
-                    
-                    return raw_result
-                else:
-                    # Static Pydantic Validation
-                    validated = self.schema_obj.model_validate(raw_result)
-                    print(f"[Extractor] Validation passed on attempt {attempt}")
-                    data = validated.model_dump()
-                    
-                    # Calculate confidence if requested using Judge LLM
-                    if with_confidence:
-                        print(f"[Extractor] Calculating confidence using Judge LLM...")
-                        confidence_map = self._evaluate_with_judge(markdown_text, data)
-                        data['_confidence'] = confidence_map
-                        print(f"[Extractor] Judge returned confidence for {len(confidence_map)} fields")
-                    
-                    return data
-                
-                
-            except ValidationError as ve:
-                error_feedback = self._format_validation_error(ve)
-                print(f"[Extractor] Validation failed: {error_feedback}")
-                
-            except json.JSONDecodeError as je:
-                error_feedback = f"Invalid JSON response: {str(je)}"
-                print(f"[Extractor] JSON parse error: {error_feedback}")
-                
-            except Exception as e:
-                error_feedback = f"Unexpected error: {str(e)}"
-                print(f"[Extractor] Error: {error_feedback}")
+        # 2. Thread 3 & 4: ChatGPT
+        for i in range(2):
+            print(f"[Extractor] Calling ChatGPT (Pass {i+1}/2)...")
+            res = self._call_openai(prompt)
+            if res: results.append(res)
+            
+        print(f"[Extractor] Gathered {len(results)} valid responses.")
         
-        # All retries failed
-        print(f"[Extractor] Extraction failed after {self.MAX_RETRIES} attempts")
-        return {}
+        if not results:
+            print("[Extractor] All extractions failed.")
+            return {}
+
+        # 3. Consensus Voting
+        flat_results = [self._flatten(r) for r in results]
+        
+        # Collect all unique keys
+        all_keys = set().union(*[d.keys() for d in flat_results])
+        
+        final_flat_data = {}
+        confidence_flat_map = {}
+        
+        total_runs = 4 
+        
+        for key in all_keys:
+            # Gather values for this key from all results
+            values = []
+            for fr in flat_results:
+                if key in fr:
+                    values.append(fr[key])
+            
+            if not values:
+                continue
+                
+            def make_hashable(v):
+                if isinstance(v, (dict, list)):
+                    return json.dumps(v, sort_keys=True)
+                return v
+
+            hashable_values = [make_hashable(v) for v in values]
+            counts = Counter(hashable_values)
+            
+            most_common_val_hash, count = counts.most_common(1)[0]
+            
+            # Retrieve original value
+            index = hashable_values.index(most_common_val_hash)
+            final_val = values[index]
+            
+            # Confidence Calculation
+            confidence = count / total_runs
+            
+            final_flat_data[key] = final_val
+            confidence_flat_map[key] = confidence
+            
+        # 4. Reconstruct
+        print("[Extractor] Reconstructing consensus data...")
+        final_data = self._unflatten(final_flat_data)
+        
+        final_data['_confidence'] = confidence_flat_map
+        
+        return final_data
+
+    def _format_validation_error(self, error: ValidationError) -> str:
+        """Format Pydantic validation errors for LLM feedback."""
+        errors = []
+        for e in error.errors():
+            field = " -> ".join(str(x) for x in e["loc"])
+            errors.append(f"- Field '{field}': {e['msg']} (got: {e.get('input', 'N/A')})")
+        return "\n".join(errors)
     
     def _format_validation_error(self, error: ValidationError) -> str:
         """Format Pydantic validation errors for LLM feedback."""
