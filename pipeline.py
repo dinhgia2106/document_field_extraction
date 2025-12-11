@@ -135,6 +135,29 @@ def validate_environment():
         return False
     
     print("[Config] GEMINI_API_KEY loaded successfully")
+
+    if "OPENAI_API_KEY" not in os.environ:
+        print("=" * 60)
+        print("WARNING: OPENAI_API_KEY not found in environment variables")
+        print("=" * 60)
+        
+        env_path = os.path.join(os.getcwd(), '.env')
+        if os.path.exists(env_path):
+            with open(env_path, 'r') as f:
+                content = f.read()
+                if "OPENAI_API_KEY" in content:
+                    print("   Key exists in file but may not be loaded correctly.")
+                else:
+                    print("   OPENAI_API_KEY not found in .env file.")
+        
+        print("\nPlease set OPENAI_API_KEY in your .env file:")
+        print('   OPENAI_API_KEY=your_api_key_here')
+        print("=" * 60)
+        # We don't return False here strictly unless we want to enforce it, 
+        # but given the user request, it's likely required now.
+        return False
+
+    print("[Config] OPENAI_API_KEY loaded successfully")
     return True
 
 
@@ -186,7 +209,7 @@ def run_pipeline(
     print("=" * 60)
     print(f"Input: {pdf_path}")
     print(f"Mode: {'DYNAMIC DISCOVERY' if use_dynamic_schema else f'STATIC SCHEMA ({schema_type})'}")
-    print(f"Confidence: {'ENABLED (using Judge LLM)' if calculate_confidence else 'DISABLED'}")
+    print(f"Confidence: {'ENABLED (using logprobs)' if calculate_confidence else 'DISABLED'}")
     print("=" * 60 + "\n")
     
     # Get schema (if static)
@@ -346,7 +369,7 @@ Examples:
         help="Document schema type (default: tax)"
     )
     parser.add_argument("--dynamic", action="store_true", help="Enable Dynamic Schema Discovery (Ignore --schema)")
-    parser.add_argument("--confidence", "-c", action="store_true", help="Calculate per-field confidence using Judge LLM")
+    parser.add_argument("--confidence", "-c", action="store_true", help="Calculate per-field confidence using logprobs")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
 
     parser.add_argument("--output", "-o", help="Output JSON file path (default: <pdf_name>_result.json)")

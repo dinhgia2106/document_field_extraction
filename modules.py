@@ -13,14 +13,10 @@ import json
 import math
 import typing
 from typing import List, Dict, Any, Optional, Type
-from collections import Counter
 from PIL import Image
 from pdf2image import convert_from_path
+from openai import OpenAI
 import google.generativeai as genai
-try:
-    from openai import OpenAI
-except ImportError:
-    OpenAI = None
 from pydantic import BaseModel, ValidationError
 import re
 from difflib import SequenceMatcher
@@ -35,7 +31,8 @@ if "GEMINI_API_KEY" in os.environ:
 # Fast/cheap model for routing (classification tasks)
 ROUTER_MODEL = "gemini-2.0-flash"
 # Powerful model for extraction (complex reasoning)
-EXTRACTION_MODEL = "gemini-2.5-flash"
+EXTRACTION_MODEL = "gemini-2.0-flash" 
+OPENAI_MODEL = "gpt-4o-mini"
 # High DPI for better OCR accuracy
 IMAGE_DPI = 300
 
@@ -364,14 +361,15 @@ class SchemaExtractor:
     
     MAX_RETRIES = 3
     
-    def __init__(self, schema: Any, model_name: str = EXTRACTION_MODEL, is_dynamic: bool = False):
+    def __init__(self, schema: Any, model_name: str = OPENAI_MODEL, is_dynamic: bool = False):
         """
         Args:
             schema: Either a Pydantic BaseModel class (static) or a Dict (dynamic schema definition)
-            model_name: Gemini model to use
+            model_name: OpenAI model to use
             is_dynamic: Helper flag to switch validation logic
         """
-        self.model = genai.GenerativeModel(model_name)
+        self.client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        self.model_name = model_name
         self.is_dynamic = is_dynamic
         self.schema_obj = schema
         
@@ -389,17 +387,6 @@ class SchemaExtractor:
             # Static Pydantic Model
             self.schema_json = json.dumps(schema.model_json_schema(), indent=2)
             self.doc_type_hint = "Document"
-        
-        # Initialize OpenAI client 
-        self.openai_client = None
-        if OpenAI:
-            api_key = os.environ.get("OPENAI_API_KEY")
-            if api_key:
-                self.openai_client = OpenAI(api_key=api_key)
-            else:
-                print("[SchemaExtractor] Warning: OPENAI_API_KEY not found. ChatGPT calls will be skipped.")
-        else:
-             print("[SchemaExtractor] Warning: 'openai' module not installed. ChatGPT calls will be skipped.")
 
     def _build_extraction_prompt(self, markdown_text: str, error_feedback: Optional[str] = None) -> str:
         """Build the extraction prompt with optional error feedback for self-correction."""
@@ -407,23 +394,17 @@ class SchemaExtractor:
         base_prompt = f"""
 You are a data extraction specialist. Extract structured information from the {self.doc_type_hint} below.
 
-You must output a JSON object with two top-level keys:
-1. "data": The extracted data matching the TARGET SCHEMA.
-2. "field_evaluations": A dictionary where keys are field names. For EACH extracted field, providing:
-   - "confidence": A score from 0.0 to 1.0 indicating your certainty.
-   - "relevance_check": A brief check on whether this extracted value is truly relevant to the field's definition in the context of this document.
-
-TARGET SCHEMA for "data":
+TARGET SCHEMA (you MUST return data matching this structure):
 ```json
 {self.schema_json}
 ```
-
 EXTRACTION RULES:
-- STRICT JSON: Return ONLY a valid JSON object with "data" and "field_evaluations".
-- MISSING DATA: Use null for missing values in "data".
-- NUMBERS: Extract numbers purely (e.g., "20,025" -> 20025).
-- IDS: Look for "Access Code" and "Notice Number" usually found in the top right header area.
-- CRITICAL: Review the "relevance_check" carefully. If a field seems present but doesn't semantically match the schema definition, lower the confidence.
+STRICT JSON: Return ONLY a valid JSON object matching the schema above.
+MISSING DATA: Use null for missing values.
+NUMBERS: Extract numbers purely (e.g., "20,025" -> 20025).
+CREDIT/DEBIT: Do NOT convert "CR" amounts to negative numbers automatically. Put the absolute amount in 'amount' and "CR" in 'balance_type'.
+IDS: Look for "Access Code" and "Notice Number" usually found in the top right header area.
+LINE ITEMS: Match descriptions to Line IDs (e.g., "Total income" -> 15000) even if the text slightly varies.
 
 DOCUMENT TEXT:
 ---
@@ -439,84 +420,264 @@ WARNING - PREVIOUS ATTEMPT FAILED VALIDATION:
 
 Please fix these errors and try again. Ensure your response is valid JSON matching the schema.
 """
-        
         return base_prompt
 
     def _call_llm(self, prompt: str) -> Dict[str, Any]:
-        """Call Gemini and parse JSON response."""
-        try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config=genai.GenerationConfig(
-                    response_mime_type="application/json"
-                )
-            )
-            return json.loads(response.text)
-        except Exception as e:
-            print(f"[Extractor] Gemini call failed: {e}")
-            return {}
-
-    def _call_openai(self, prompt: str) -> Dict[str, Any]:
-        """Call ChatGPT (OpenAI) and parse JSON response."""
-        if not self.openai_client:
+        """Call LLM and parse JSON response."""
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that outputs JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0
+        )
+        content = response.choices[0].message.content
+        return json.loads(content)
+    
+    def _call_llm_with_logprobs(self, prompt: str) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """
+        Call LLM and return both parsed JSON result and logprobs data.
+        
+        Returns:
+            Tuple of (parsed_data, logprobs_list)
+            logprobs_list contains [{"token": str, "prob": float, "logprob": float}, ...]
+        """
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that outputs JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0,
+            logprobs=True,
+            top_logprobs=1 # We only needs the top one
+        )
+        
+        content = response.choices[0].message.content
+        parsed_json = json.loads(content)
+        
+        # Extract logprobs data from response
+        logprobs_list = []
+        logprobs_content = response.choices[0].logprobs.content
+        
+        if logprobs_content:
+            for item in logprobs_content:
+                prob = math.exp(item.logprob)
+                logprobs_list.append({
+                    "token": item.token,
+                    "prob": prob,
+                    "logprob": item.logprob
+                })
+        
+        return parsed_json, logprobs_list
+    
+    def _calculate_field_confidence(self, extracted_data: Dict[str, Any], 
+                                     logprobs_list: List[Dict[str, Any]]) -> Dict[str, float]:
+        """
+        Calculate confidence score for each field based on logprobs.
+        
+        Strategy:
+        1. Reconstruct the JSON string from tokens
+        2. For each field key, find the token range where its value is defined
+        3. Average the probabilities of those tokens
+        
+        Args:
+            extracted_data: The extracted data dictionary
+            logprobs_list: List of token logprobs from LLM response
+            
+        Returns:
+            Dict mapping field names to confidence scores (0.0 - 1.0)
+        """
+        if not logprobs_list:
             return {}
         
-        try:
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant that outputs JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                response_format={"type": "json_object"}
-            )
-            content = response.choices[0].message.content
-            return json.loads(content)
-        except Exception as e:
-            print(f"[Extractor] ChatGPT call failed: {e}")
-            return {}
+        confidence_map = {}
+        
+        # Reconstruct the full response text from tokens
+        full_text = "".join([lp["token"] for lp in logprobs_list])
+        
+        def get_field_confidence(field_name: str, field_value: Any) -> float:
+            """
+            Find the tokens corresponding to a field value and compute average confidence.
+            """
+            if field_value is None:
+                return 0.0  # Null values have no confidence
+            
+            # Convert value to string representation for matching
+            if isinstance(field_value, bool):
+                value_str = "true" if field_value else "false"
+            elif isinstance(field_value, (int, float)):
+                value_str = str(field_value)
+            elif isinstance(field_value, str):
+                value_str = field_value
+            elif isinstance(field_value, dict):
+                # For nested objects, we'll calculate confidence recursively
+                nested_confidences = []
+                for k, v in field_value.items():
+                    nested_conf = get_field_confidence(k, v)
+                    if nested_conf > 0:
+                        nested_confidences.append(nested_conf)
+                return sum(nested_confidences) / len(nested_confidences) if nested_confidences else 0.0
+            elif isinstance(field_value, list):
+                # For arrays, average the confidence of each element
+                if not field_value:
+                    return 0.0
+                element_confidences = []
+                for item in field_value:
+                    item_conf = get_field_confidence("", item)
+                    if item_conf > 0:
+                        element_confidences.append(item_conf)
+                return sum(element_confidences) / len(element_confidences) if element_confidences else 0.0
+            else:
+                value_str = str(field_value)
+            
+            # Find the value in the full text and get corresponding token indices
+            value_start = full_text.find(value_str)
+            if value_start == -1:
+                # Try without quotes for string values
+                value_start = full_text.find(f'"{value_str}"')
+                if value_start != -1:
+                    value_start += 1  # Skip opening quote
+            
+            if value_start == -1:
+                return 0.85  # Default confidence if we can't locate the value
+            
+            value_end = value_start + len(value_str)
+            
+            # Map character positions to token indices
+            char_pos = 0
+            token_probs = []
+            
+            for lp in logprobs_list:
+                token_len = len(lp["token"])
+                token_end = char_pos + token_len
+                
+                # Check if this token overlaps with the value range
+                if char_pos < value_end and token_end > value_start:
+                    token_probs.append(lp["prob"])
+                
+                char_pos = token_end
+                
+                if char_pos >= value_end:
+                    break
+            
+            if token_probs:
+                return sum(token_probs) / len(token_probs)
+            
+            return 0.85  # Default if no matching tokens found
+        
+        # Calculate confidence for each field
+        def process_fields(data: Dict[str, Any], prefix: str = "") -> Dict[str, float]:
+            result = {}
+            for key, value in data.items():
+                field_path = f"{prefix}.{key}" if prefix else key
+                
+                if isinstance(value, dict):
+                    # Recursively process nested objects
+                    nested_result = process_fields(value, field_path)
+                    result.update(nested_result)
+                    # Also store the aggregate confidence for the parent
+                    if nested_result:
+                        result[field_path] = sum(nested_result.values()) / len(nested_result)
+                elif isinstance(value, list) and value and isinstance(value[0], dict):
+                    # List of objects
+                    list_confidences = []
+                    for i, item in enumerate(value):
+                        if isinstance(item, dict):
+                            item_result = process_fields(item, f"{field_path}[{i}]")
+                            result.update(item_result)
+                            if item_result:
+                                list_confidences.append(sum(item_result.values()) / len(item_result))
+                    if list_confidences:
+                        result[field_path] = sum(list_confidences) / len(list_confidences)
+                else:
+                    result[field_path] = get_field_confidence(key, value)
+            
+            return result
+        
+        confidence_map = process_fields(extracted_data)
+        return confidence_map
 
     def extract(self, markdown_text: str, with_confidence: bool = False) -> Dict[str, Any]:
         """
-        Extracts structured data using a single Gemini pass with self-evaluation.
+        Extracts structured data from markdown with self-correction loop.
+        
+        Args:
+            markdown_text: Normalized Markdown content
+            with_confidence: If True, also calculate and return confidence scores
+            
+        Returns:
+            Dict: Validated Data Dict. If with_confidence=True, includes '_confidence' key
+                  with per-field confidence scores.
         """
-        print("[Extractor] Starting Extraction (Gemini + Self-Correction)...")
+        print(f"[Extractor] Starting extraction with {self.MAX_RETRIES} max attempts...")
+        if with_confidence:
+            print(f"[Extractor] Confidence calculation enabled (using logprobs)")
         
-        prompt = self._build_extraction_prompt(markdown_text)
+        error_feedback = None
         
-        # Single Gemini Call
-        result = self._call_llm(prompt)
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            print(f"[Extractor] Attempt {attempt}/{self.MAX_RETRIES}...")
+            
+            try:
+                # Build prompt (with error feedback if retry)
+                prompt = self._build_extraction_prompt(markdown_text, error_feedback)
+                
+                # Call LLM - with logprobs if confidence is requested
+                if with_confidence:
+                    raw_result, logprobs_list = self._call_llm_with_logprobs(prompt)
+                    print(f"[Extractor] Received {len(logprobs_list)} tokens with logprobs")
+                else:
+                    raw_result = self._call_llm(prompt)
+                    logprobs_list = None
+                
+                # print(f"[Extractor] LLM returned: {json.dumps(raw_result, indent=2)[:200]}...")
+                
+                # Validate
+                if self.is_dynamic:
+                    # For dynamic mode, we just check if it's valid JSON (already done by json.loads)
+                    print(f"[Extractor] Validation passed (Dynamic Mode)")
+                    
+                    # Calculate confidence if requested
+                    if with_confidence and logprobs_list:
+                        confidence_map = self._calculate_field_confidence(raw_result, logprobs_list)
+                        raw_result['_confidence'] = confidence_map
+                        print(f"[Extractor] Calculated confidence for {len(confidence_map)} fields")
+                    
+                    return raw_result
+                else:
+                    # Static Pydantic Validation
+                    validated = self.schema_obj.model_validate(raw_result)
+                    print(f"[Extractor] Validation passed on attempt {attempt}")
+                    data = validated.model_dump()
+                    
+                    # Calculate confidence if requested
+                    if with_confidence and logprobs_list:
+                        confidence_map = self._calculate_field_confidence(data, logprobs_list)
+                        data['_confidence'] = confidence_map
+                        print(f"[Extractor] Calculated confidence for {len(confidence_map)} fields")
+                    
+                    return data
+                
+                
+            except ValidationError as ve:
+                error_feedback = self._format_validation_error(ve)
+                print(f"[Extractor] Validation failed: {error_feedback}")
+                
+            except json.JSONDecodeError as je:
+                error_feedback = f"Invalid JSON response: {str(je)}"
+                print(f"[Extractor] JSON parse error: {error_feedback}")
+                
+            except Exception as e:
+                error_feedback = f"Unexpected error: {str(e)}"
+                print(f"[Extractor] Error: {error_feedback}")
         
-        if not result:
-            print("[Extractor] Extraction failed (No response).")
-            return {}
-        
-        # Normalize result structure
-        if "data" in result and "field_evaluations" in result:
-             final_data = result["data"]
-             evals = result["field_evaluations"]
-             
-             # Attach metadata
-             final_data["_confidence"] = {k: v.get("confidence", 0.0) for k, v in evals.items()}
-             final_data["_relevance"] = {k: v.get("relevance_check", "") for k, v in evals.items()}
-             
-             return final_data
-        elif "data" in result:
-             # Partial success
-             return result["data"]
-        else:
-             # Fallback if LLM forgot structure and just returned data
-             # Check if it looks like data (heuristic)
-             print("[Extractor] Warning: Unexpected response structure, assuming direct data.")
-             return result
-
-    def _format_validation_error(self, error: ValidationError) -> str:
-        """Format Pydantic validation errors for LLM feedback."""
-        errors = []
-        for e in error.errors():
-            field = " -> ".join(str(x) for x in e["loc"])
-            errors.append(f"- Field '{field}': {e['msg']} (got: {e.get('input', 'N/A')})")
-        return "\n".join(errors)
+        # All retries failed
+        print(f"[Extractor] Extraction failed after {self.MAX_RETRIES} attempts")
+        return {}
     
     def _format_validation_error(self, error: ValidationError) -> str:
         """Format Pydantic validation errors for LLM feedback."""
