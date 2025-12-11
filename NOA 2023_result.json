@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "timestamp": "2025-12-10T17:23:47.368249",
+    "timestamp": "2025-12-11T14:30:01.769723",
     "success": true,
     "total_pages": 8,
     "kept_pages": 7,
@@ -10,88 +10,119 @@
     {
       "page": 1,
       "classification": "A",
-      "reason": "The document contains financial information, specifically an amount due of $6,291.33 and a payment due date.",
-      "confidence": 0.95
+      "reason": "Contains financial summary with amount due and pay by date."
     },
     {
       "page": 2,
       "classification": "A",
-      "reason": "The document contains numeric tables including total income, deductions, net income, taxable income, tax credits, and the balance due. It also contains financial summaries and assessment results.",
-      "confidence": 0.95
+      "reason": "Contains numeric tables, financial summaries, tax calculations, total amounts, and assessment results."
     },
     {
       "page": 3,
-      "classification": "B",
-      "reason": "Contains personal information (name, address, SIN), tax year, and a training credit amount.",
-      "confidence": 0.95
+      "classification": "A",
+      "reason": "Contains tax information, amounts, social insurance number, and tax year, indicating financial or key numerical data."
     },
     {
       "page": 4,
       "classification": "A",
-      "reason": "The page contains numeric tables showing RRSP deduction limits and calculations.",
-      "confidence": 0.95
+      "reason": "Contains numeric tables with RRSP deduction limit and contribution room calculations."
     },
     {
       "page": 5,
       "classification": "B",
-      "reason": "The page contains information about tax returns, addresses, account changes, and payment options. It also mentions social insurance numbers, which is considered personal information.",
-      "confidence": 0.85
+      "reason": "The page contains information about payment methods, addresses, account numbers (social insurance number mentioned), and reference numbers (tax centre)."
     },
     {
       "page": 6,
       "classification": "C",
-      "reason": "The page appears to be blank with only a page number.",
-      "confidence": 0.95
+      "reason": "This page appears blank with only a page number, indicating it may be a separator or otherwise not contain valuable content."
     },
     {
       "page": 7,
       "classification": "A",
-      "reason": "The document contains tax year information and an area for amount due and amount paid.",
-      "confidence": 0.95
+      "reason": "Contains social insurance number, tax year, remittance voucher, amount due and amount paid fields."
     },
     {
       "page": 8,
       "classification": "A",
-      "reason": "Contains a field for 'Amount of payment' which indicates financial data.",
-      "confidence": 0.95
+      "reason": "Contains a field for 'Amount of payment' and references to tax payments and penalties, which falls under the criteria for Class A."
     }
   ],
   "extracted_data": {
     "social_insurance_number": "XXX XX6 789",
-    "tax_year": 2023,
+    "tax_year": "2023",
     "date_issued": "May 9, 2024",
-    "amount_due": 6291.33,
+    "amount_due": "6291.33",
     "pay_by_date": "May 29, 2024",
-    "total_income": 128820.0,
-    "deductions_from_total_income": 3649.0,
-    "net_income": 125171.0,
-    "taxable_income": 125171.0,
-    "total_federal_non_refundable_tax_credits": 3074.0,
-    "total_ontario_non_refundable_tax_credits": 807.0,
-    "net_federal_tax": 17814.12,
-    "net_ontario_tax": 11534.74,
-    "total_payable": 29348.86,
-    "total_income_tax_deducted": 23072.98,
-    "total_credits": 23072.98,
-    "total_payable_minus_total_credits": 6275.88,
-    "arrears_interest": 15.45,
-    "balance_from_this_assessment": 6291.33,
-    "balance_due": 6291.33,
-    "rrsp_deduction_limit_for_2023": 28516.0,
-    "employer_prpp_contributions_for_2023": 0.0,
-    "allowable_rrsp_contributions_deducted_for_2023": 0.0,
-    "unused_rrsp_deduction_room_at_the_end_of_2023": 28516.0,
-    "additional_rrsp_deduction_limit_earned_in_2023": 23132.0,
-    "2023_pension_adjustment": 0.0,
-    "2023_prescribed_amount_for_connected_persons": 0.0,
-    "additional_rrsp_deduction_limit_you_earned_in_2023": 23132.0,
-    "2024_unused_rrsp_deduction_room_at_the_end_of_2023": 28516.0,
-    "2024_additional_rrsp_deduction_limit_earned_in_2023": 23132.0,
-    "2024_net_past_service_pension_adjustment": 0.0,
-    "2024_pension_adjustment_reversal": 0.0,
-    "2024_rrsp_deduction_limit": 51648.0,
-    "2024_unused_rrsp_contributions_previously_reported": 0.0,
-    "2024_available_rrsp_contribution_room": 51648.0
+    "total_income": "128820",
+    "deductions_from_total_income": "3649",
+    "net_income": "125171",
+    "taxable_income": "125171",
+    "total_federal_non_refundable_tax_credits": "3074",
+    "total_ontario_non_refundable_tax_credits": "807",
+    "net_federal_tax": "17814.12",
+    "net_ontario_tax": "11534.74",
+    "total_payable": "29348.86",
+    "total_income_tax_deducted": "23072.98",
+    "total_credits": "23072.98",
+    "total_payable_minus_total_credits": "6275.88",
+    "arrears_interest": "15.45",
+    "balance_from_this_assessment": "6291.33",
+    "balance_due": "6291.33",
+    "rrsp_deduction_limit_for_2023": "28516",
+    "minus_employers_prpp_contributions_for_2023": "0",
+    "minus_allowable_rrsp_contributions_deducted_for_2023": "0",
+    "equals_your_unused_rrsp_deduction_room_at_the_end_of_2023": "28516",
+    "18_of_2023_earned_income_up_to_a_maximum_of_31560": "23132",
+    "minus_2023_pension_adjustment_pa": "0",
+    "minus_2023_prescribed_amount_for_connected_persons": "0",
+    "equals_additional_rrsp_deduction_limit_you_earned_in_2023": "23132",
+    "your_2024_rrsp_deduction_limit": "51648",
+    "unused_rrsp_deduction_room_at_the_end_of_2023_for_2024_calculation": "28516",
+    "additional_rrsp_deduction_limit_earned_in_2023_for_2024_calculation": "23132",
+    "plus_2024_net_past_service_pension_adjustment_pspa": "0",
+    "plus_2024_pension_adjustment_reversal_par": "0",
+    "equals_rrsp_deduction_limit_for_2024": "51648",
+    "minus_unused_rrsp_contributions_previously_reported_and_available_to_deduct_for_2024": "0",
+    "your_available_rrsp_contribution_room_for_2024": "51648",
+    "_confidence": {
+      "social_insurance_number": 0.9999998364864123,
+      "tax_year": 1.0,
+      "date_issued": 0.9999994803226202,
+      "amount_due": 0.9999903525889106,
+      "pay_by_date": 0.9999999405816373,
+      "total_income": 0.9999969760110866,
+      "deductions_from_total_income": 0.9999994058167923,
+      "net_income": 0.9999991223848665,
+      "taxable_income": 0.9999991223848665,
+      "total_federal_non_refundable_tax_credits": 0.999999672174612,
+      "total_ontario_non_refundable_tax_credits": 0.9999989153214063,
+      "net_federal_tax": 0.9990558775479823,
+      "net_ontario_tax": 0.999999944120653,
+      "total_payable": 0.9999998968560674,
+      "total_income_tax_deducted": 0.9999999816063805,
+      "total_credits": 0.9999999816063805,
+      "total_payable_minus_total_credits": 0.9999952902432382,
+      "arrears_interest": 1.0,
+      "balance_from_this_assessment": 0.9999903525889106,
+      "balance_due": 0.9999903525889106,
+      "rrsp_deduction_limit_for_2023": 0.9999958116999726,
+      "minus_employers_prpp_contributions_for_2023": 1.0,
+      "minus_allowable_rrsp_contributions_deducted_for_2023": 1.0,
+      "equals_your_unused_rrsp_deduction_room_at_the_end_of_2023": 0.9999958116999726,
+      "18_of_2023_earned_income_up_to_a_maximum_of_31560": 1.0,
+      "minus_2023_pension_adjustment_pa": 1.0,
+      "minus_2023_prescribed_amount_for_connected_persons": 1.0,
+      "equals_additional_rrsp_deduction_limit_you_earned_in_2023": 1.0,
+      "your_2024_rrsp_deduction_limit": 0.9999380878094355,
+      "unused_rrsp_deduction_room_at_the_end_of_2023_for_2024_calculation": 0.9999958116999726,
+      "additional_rrsp_deduction_limit_earned_in_2023_for_2024_calculation": 1.0,
+      "plus_2024_net_past_service_pension_adjustment_pspa": 1.0,
+      "plus_2024_pension_adjustment_reversal_par": 1.0,
+      "equals_rrsp_deduction_limit_for_2024": 0.9999380878094355,
+      "minus_unused_rrsp_contributions_previously_reported_and_available_to_deduct_for_2024": 1.0,
+      "your_available_rrsp_contribution_room_for_2024": 0.9999380878094355
+    }
   },
   "errors": []
 }

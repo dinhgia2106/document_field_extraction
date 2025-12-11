@@ -164,7 +164,8 @@ def run_pipeline(
     schema_type: str = "tax", 
     verbose: bool = False,
     output_path: Optional[str] = None,
-    use_dynamic_schema: bool = False
+    use_dynamic_schema: bool = False,
+    calculate_confidence: bool = False
 ) -> PipelineResult:
     """
     Execute the complete document extraction pipeline.
@@ -175,6 +176,7 @@ def run_pipeline(
         verbose: Print detailed output
         output_path: Optional path to save JSON result
         use_dynamic_schema: Identify fields automatically using AI
+        calculate_confidence: Calculate per-field confidence using logprobs
     """
 
     errors = []
@@ -184,6 +186,7 @@ def run_pipeline(
     print("=" * 60)
     print(f"Input: {pdf_path}")
     print(f"Mode: {'DYNAMIC DISCOVERY' if use_dynamic_schema else f'STATIC SCHEMA ({schema_type})'}")
+    print(f"Confidence: {'ENABLED (using logprobs)' if calculate_confidence else 'DISABLED'}")
     print("=" * 60 + "\n")
     
     # Get schema (if static)
@@ -276,7 +279,7 @@ def run_pipeline(
         # Static Extraction
         extractor = SchemaExtractor(schema=schema, is_dynamic=False)
         
-    extracted_data = extractor.extract(markdown_content)
+    extracted_data = extractor.extract(markdown_content, with_confidence=calculate_confidence)
 
     
     success = bool(extracted_data)
@@ -343,6 +346,7 @@ Examples:
         help="Document schema type (default: tax)"
     )
     parser.add_argument("--dynamic", action="store_true", help="Enable Dynamic Schema Discovery (Ignore --schema)")
+    parser.add_argument("--confidence", "-c", action="store_true", help="Calculate per-field confidence using logprobs")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
 
     parser.add_argument("--output", "-o", help="Output JSON file path (default: <pdf_name>_result.json)")
@@ -370,7 +374,8 @@ Examples:
         schema_type=args.schema, 
         verbose=args.verbose,
         output_path=output_path,
-        use_dynamic_schema=args.dynamic
+        use_dynamic_schema=args.dynamic,
+        calculate_confidence=args.confidence
     )
 
     
