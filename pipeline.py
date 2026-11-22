@@ -5,8 +5,8 @@ Process documents like an expert: Scan -> Select important pages -> Read careful
 
 Usage:
     python pipeline.py --pdf "path/to/document.pdf"
-    python pipeline.py --pdf "NOA 2023.pdf" --verbose
-    python pipeline.py --pdf "NOA 2023.pdf" --output result.json
+    python pipeline.py --pdf "samples/noa-2023-specimen.pdf" --verbose
+    python pipeline.py --pdf "samples/noa-2023-specimen.pdf" --output result.json
 """
 
 import os
@@ -355,7 +355,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python pipeline.py --pdf "NOA 2023.pdf"
+    python pipeline.py --pdf "samples/noa-2023-specimen.pdf"
     python pipeline.py --pdf "invoice.pdf" --schema invoice
     python pipeline.py --pdf "document.pdf" --verbose
     python pipeline.py --pdf "document.pdf" --output result.json
